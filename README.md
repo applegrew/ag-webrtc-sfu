@@ -8,9 +8,8 @@ This is a many-to-many websocket based SFU. This has the following features.
 * No codec restriction per call. You can have H264 and VP8 in the same conference.
 * Support for multiple browsers
 * Concept of rooms. The conference tracks are forwarded within a given room.
+* Supports JWT based authentication to connect to websocket to initiate Webrtc peer connection.
 
-For a production application you should also explore [simulcast](https://github.com/pion/webrtc/tree/master/examples/simulcast),
-metrics and robust error handling.
 
 ## Instructions
 ### Download
