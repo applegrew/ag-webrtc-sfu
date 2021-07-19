@@ -1,6 +1,5 @@
 # ag-webrtc-sfu
-sfu-ws is a many-to-many websocket based SFU. This is a more advanced version of [broadcast](https://github.com/pion/webrtc/tree/master/examples/broadcast)
-and demonstrates the following features.
+This is a many-to-many websocket based SFU. This has the following features.
 
 * Trickle ICE
 * Re-negotiation
@@ -8,30 +7,23 @@ and demonstrates the following features.
 * Multiple inbound/outbound tracks per PeerConnection
 * No codec restriction per call. You can have H264 and VP8 in the same conference.
 * Support for multiple browsers
-
-We also provide a flutter client that supports the following platforms
-* Android, iOS
-* Web
-* MacOS (Windows, Linux and Fuschia in the [future](https://github.com/flutter-webrtc/flutter-webrtc#functionality))
+* Concept of rooms. The conference tracks are forwarded within a given room.
 
 For a production application you should also explore [simulcast](https://github.com/pion/webrtc/tree/master/examples/simulcast),
 metrics and robust error handling.
 
 ## Instructions
-### Download sfu-ws
-This example requires you to clone the repo since it is serving static HTML.
+### Download
+This code can be run in dev mode which requires you to clone the repo since it will be serving static HTML and a JS file. If you do not use the `-dev` option then the HTML & JS files won't be served.
 
 ```
-mkdir -p $GOPATH/src/github.com/pion
-cd $GOPATH/src/github.com/pion
-git clone https://github.com/pion/example-webrtc-applications.git
-cd webrtc/examples/sfu-ws
+git clone git@github.com:applegrew/ag-webrtc-sfu.git
+cd ag-webrtc-sfu
 ```
 
 ### Run sfu-ws
 Execute `go build` then `./ag-webrtc-sfu -dev -addr=:9900`
 
 ### Open the Web UI
-Open [http://localhost:8080](http://localhost:8080). This will automatically connect and send your video. Now join from other tabs and browsers!
+Open [http://localhost:9900](http://localhost:9900). This will automatically connect and send your video. Now join from other tabs and browsers!
 
-Congrats, you have used Pion WebRTC! Now start building something cool
