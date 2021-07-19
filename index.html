@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <script src="ag-webrtc-sfu.js"></script>
+  </head>
+  <body>
+    <h3> Local Video </h3>
+    <video id="localVideo" width="160" height="120"></video> <br />
+    <button id="audioToggle">Mute</button> | <button id="videoToggle">Stop video</button>
+    <br/>
+    <br/>
+    <input type="text" placeholder="Enter room id" id="roomId" />
+    <button id="join">Join room</button>
+    <br />
+    <br />
+
+
+    <h3> Remote Video </h3>
+    <div id="remoteVideos"></div> <br />
+
+
+  </body>
+
+  <script>
+    function getRemoteVideoElByPeerId(peerId) {
+      let result;
+      document.querySelectorAll("video.remoteVideo").forEach(el => {
+        if (el.peerId === peerId) {
+          result = el;
+        }
+      });
+      return result;
+    }
+
+    const sfu = new AgWebrtcSfu(function (roomId) {
+      const socketUrl = "{{.}}";
+      const tokenFetchUrl = `/get.token?roomId=${roomId}`;
+      return fetch(tokenFetchUrl).then(response => response.json()).then(data => {
+        return {socketUrl, token: data.token, tokenHint: ""};
+      });
+    });
+    let isVideo = true;
+    let isAudio = true;
+    let isJoin = true;
+
+    const audioToggle = document.getElementById("audioToggle");
+    const videoToggle = document.getElementById("videoToggle");
+    const localVideo = document.getElementById("localVideo");
+    const txtRoomId = document.getElementById("roomId");
+    const join = document.getElementById("join");
+
+    audioToggle.addEventListener("click", function () {
+      isAudio = !isAudio;
+      this.innerText = isAudio ? "Mute" : "Unmute";
+      sfu.setAudio({enabled: isAudio});
+    });
+    videoToggle.addEventListener("click", function () {
+      isVideo = !isVideo;
+      this.innerText = isVideo ? "Stop video" : "Start video";
+      sfu.setVideo({enabled: isVideo});
+    });
+    join.addEventListener("click", function () {
+      if (isJoin) {
+        if (!txtRoomId.value) {
+          alert("Room id not provided");
+          return
+        }
+        sfu.startSession(txtRoomId.value);
+        isJoin = false;
+      } else {
+        sfu.endSession();
+        isJoin = true;
+      }
+      this.innerText = isJoin ? "Join" : "Leave";
+    });
+
+    sfu.onEvent("end-session", function () {
+      isJoin = true;
+      join.innerText = "Join";
+      document.getElementById("remoteVideos").innerHTML = "";
+    });
+    sfu.onEvent("add-local-track", function ({stream, track}) {
+      if (track.kind === 'audio') {
+        return
+      }
+      localVideo.srcObject = stream;
+      localVideo.autoplay = true
+      localVideo.controls = false
+    });
+    sfu.onEvent("add-remote-track", function ({stream, track, peerId}) {
+      if (track.kind === 'audio') {
+        console.log("ignoring audio track")
+        return
+      }
+      let el = getRemoteVideoElByPeerId(peerId);
+      if (!el) {
+        el = document.createElement('video')
+        el.className = "remoteVideo";
+        el.controls = false
+        el.peerId = peerId;
+        document.getElementById('remoteVideos').appendChild(el);
+      }
+      el.srcObject = stream
+      el.autoplay = true
+    });
+    sfu.onEvent("peer-gone", function ({peerId}) {
+      let el = getRemoteVideoElByPeerId(peerId);
+      if (el && el.parentNode) {
+        el.parentNode.removeChild(el)
+      }
+    });
+  </script>
+</html>
