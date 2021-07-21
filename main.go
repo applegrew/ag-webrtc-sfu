@@ -508,6 +508,17 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 				log.Println(err)
 				return
 			}
+		case "audio-muted":
+			isMuted := message.Data == "true"
+			data, err := json.Marshal(struct {
+				PeerId  string `json:"peer_id"`
+				IsMuted bool   `json:"is_muted"`
+			}{peerId, isMuted})
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			broadcastToOtherPeersInRoom(room, peerId, &websocketMessage{"audio-muted", string(data)})
 		}
 	}
 }

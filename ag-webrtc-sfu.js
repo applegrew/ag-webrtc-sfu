@@ -53,6 +53,8 @@
                 pc.setRemoteDescription(offer);
                 pc.createAnswer().then(answer => {
                     pc.setLocalDescription(answer);
+                    // Before sending the answer let's send our audio state broadcast
+                    ws.send(JSON.stringify({event: 'audio-muted', data: (!sfu._audioEnabled).toString()}));
                     ws.send(JSON.stringify({event: 'answer', data: JSON.stringify(answer)}));
                 });
                 return
@@ -67,7 +69,7 @@
                 pc.addIceCandidate(candidate);
                 return
 
-            case 'track-meta':
+            case 'track-meta': {
                 console.debug("onSocketMessage, track-meta");
                 let {peer_id, id} = JSON.parse(msg.data);
                 if (!peer_id || !id) {
@@ -78,7 +80,8 @@
                 if (!peer) {
                     remoteTrackData = sfu._remotePeers[PARKING][id];
                     if (remoteTrackData) {
-                        peer = {tracks:{
+                        peer = {
+                            tracks: {
                                 [id]: remoteTrackData
                             }
                         };
@@ -98,7 +101,7 @@
                                 }
                             }
                         });
-                        peer = {tracks:{}};
+                        peer = {tracks: {}};
                     }
                     sfu._remotePeers[peer_id] = peer;
                     fireEvent(sfu, "peer-add", {peerId: peer_id});
@@ -111,9 +114,14 @@
                     console.warn("Remote track data for id " + id + " not set");
                     return
                 }
-                fireEvent(sfu, "add-remote-track", {stream:remoteTrackData.stream, track:remoteTrackData.track, peerId: peer_id});
+                fireEvent(sfu, "add-peer-track", {
+                    stream: remoteTrackData.stream,
+                    track: remoteTrackData.track,
+                    peerId: peer_id,
+                    isMuted: remoteTrackData.track.kind === 'audio'? !remoteTrackData.track.enabled : undefined
+                });
                 return
-
+            }
             case 'peer-gone':
                 let peerId = msg.data;
                 console.debug("onSocketMessage, peer-gone: ", peerId);
@@ -126,6 +134,26 @@
                 }
                 fireEvent(sfu, "peer-gone", {peerId});
                 return
+
+            case 'audio-muted': {
+                console.debug("onSocketMessage, audio-muted");
+                let {peer_id, is_muted} = JSON.parse(msg.data);
+                if (!peer_id || typeof is_muted === 'undefined') {
+                    return console.warn('Invalid audio-muted');
+                }
+                if (sfu._remotePeers[peer_id])
+                    fireEvent(sfu, "peer-muted", {peerId: peer_id, isMuted: is_muted});
+                else {
+                    // This peer has not joined yet
+                    let state = sfu._remotePeersStateCahce[peer_id];
+                    if (!state) {
+                        state = {};
+                        sfu._remotePeersStateCahce[peer_id] = state;
+                    }
+                    state.isMuted = is_muted;
+                }
+                return
+            }
         }
     }
 
@@ -146,6 +174,7 @@
         this._remotePeers = {
             [PARKING]: {}
         };
+        this._remotePeersStateCahce = {};
     }
     Sfu.prototype = {
         MAX_RETRY_COUNT: 5
@@ -179,14 +208,17 @@
                 this._localStream = stream;
                 stream.getTracks().forEach(track => {
                     this._pc.addTrack(track, stream);
-                    if (disableAudio && track.kind === 'audio')
-                        track.enabled = false;
+                    if (track.kind === 'audio') {
+                        if (disableAudio)
+                            track.enabled = false;
+                    }
                     track.onended = () => {
                         fireEvent(this, "remove-local-track", {stream, track});
                     };
-                    fireEvent(this, "add-local-track", {stream, track});
+                    fireEvent(this, "add-local-track", {stream, track, isMuted: track.kind === 'audio'? !track.enabled : undefined});
                 });
             }).catch(error => {
+                console.error(error);
                 fireEvent(this, "user-device-error", {error});
             }).finally(() => {
                 this._ws = new WebSocket(socketUrl);
@@ -206,7 +238,7 @@
             pc.ontrack = (event) => {
                 console.debug("_pc.ontrack", event);
                 event.streams[0].addEventListener("removetrack", (trackEvent) => {
-                    fireEvent(this, "remove-remote-track", {stream:event.streams[0], track:trackEvent.track});
+                    fireEvent(this, "remove-peer-track", {stream:event.streams[0], track:trackEvent.track});
                     const id = event.streams[0].id + '';
                     const peerIds = Object.keys(this._remotePeers);
                     peerIds.forEach((peerId) => {
@@ -239,7 +271,16 @@
                     if (peer.tracks[id]) {
                         peer.tracks[id] = remoteTrackData;
                         found = true;
-                        fireEvent(this, "add-remote-track", {event, stream:remoteTrackData.stream, track:remoteTrackData.track, peerId});
+                        let isMuted;
+                        if (remoteTrackData.track.kind === 'audio' && this._remotePeersStateCahce[peerId]) {
+                            isMuted = this._remotePeersStateCahce[peerId].isMuted;
+                            delete this._remotePeersStateCahce[peerId];
+                        }
+                        fireEvent(this, "add-peer-track", {
+                            stream:remoteTrackData.stream,
+                            track:remoteTrackData.track,
+                            peerId,
+                            isMuted});
                         break;
                     }
                 }
@@ -311,6 +352,7 @@
                     if (sender.track && sender.track.kind === 'audio')
                         sender.track.enabled = enabled;
                 });
+                this._ws.send(JSON.stringify({event: 'audio-muted', data: (!enabled).toString()}));
                 // restartSession(this);
             }
         }

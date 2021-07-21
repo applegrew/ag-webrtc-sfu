@@ -23,41 +23,39 @@
   </body>
 
   <script>
+    function removeAllChildren(el) {
+      while (el.firstChild)
+        el.removeChild(el.firstChild);
+    }
+
     (function () {
       'use strict';
 
-      function removeAllChildren(el) {
-        while (el.firstChild)
-          el.removeChild(el.firstChild);
-      }
-
       function updateWrapper(u) {
         const requiresVideoEl = !!u._srcObject;
-        let isVideoOn = false;
-        let isAudioOn = false;
-        if (requiresVideoEl) {
-          u._srcObject.getTracks().forEach((track) => {
-            if (track.kind === 'audio' && track.enabled && track.readyState === 'live' && !track.muted)
-              isAudioOn = true;
-            else if (track.kind === 'video' && track.enabled && track.readyState === 'live')
-              isVideoOn = true;
-            if (!track._attachedListeners)
-              track.addEventListener('ended', () => updateWrapper(u));
-            track._attachedListeners = true;
-          });
-          if (!u._srcObject._attachedListeners)
-            u._srcObject.addEventListener('removetrack', () => updateWrapper(u));
-          u._srcObject._attachedListeners = true;
-        }
-
-        u.setNoVideo(!isVideoOn);
-        u.setMuted(!isAudioOn);
+        let isVideoOn = u._isVideoOn;
+        // let isAudioOn = u._isAudioOn;
+        // if (requiresVideoEl) {
+        //   u._srcObject.getTracks().forEach((track) => {
+        //     if (track.kind === 'audio' && track.enabled && track.readyState === 'live' && !track.muted)
+        //       isAudioOn = true;
+        //     else if (track.kind === 'video' && track.enabled && track.readyState === 'live')
+        //       isVideoOn = true;
+        //     if (!track._attachedListeners)
+        //       track.addEventListener('ended', () => updateWrapper(u));
+        //     track._attachedListeners = true;
+        //   });
+        //   if (!u._srcObject._attachedListeners)
+        //     u._srcObject.addEventListener('removetrack', () => updateWrapper(u));
+        //   u._srcObject._attachedListeners = true;
+        // }
 
         if (requiresVideoEl) {
           if (!u._videoEl) {
             removeAllChildren(u._wrapper);
+            u._userEl = undefined;
             const el = document.createElement('video')
-            el.className = "remoteVideo";
+            el.className = "remote-video";
             el.controls = false
             u._wrapper.appendChild(el);
             u._videoEl = el;
@@ -68,13 +66,22 @@
         } else {
           u._videoEl = undefined;
           removeAllChildren(u._wrapper);
+          u._userEl = undefined;
         }
         if (!isVideoOn) {
-          if (u._videoEl)
+          if (u._videoEl) // Then we are using videoEL as audio source only
             u._videoEl.style.visibility = "hidden";
+          if (u._userEl)
+            u._userEl.parentNode.removeChild(u._userEl);
           const el = document.createElement('i')
           el.className = "fas fa-smile user";
           u._wrapper.appendChild(el);
+          u._userEl = el;
+        } else {
+          if (u._userEl) {
+            u._userEl.parentNode.removeChild(u._userEl);
+            u._userEl = undefined;
+          }
         }
       }
 
@@ -154,13 +161,13 @@
               height: 300px;
               width: 300px;
             }
-            .video_container, .remoteVideo {
+            .video_container, .remote-video {
               position: relative;
               height: 100%;
               width: 100%;
               z-index: 0;
             }
-            .remoteVideo {
+            .remote-video {
               object-fit: cover;
               border-radius: 6px;
             }
@@ -187,10 +194,14 @@
             }
             .user {
               display: block;
-              position: relative;
+              position: absolute;
               font-size: 100px;
               text-align: center;
-              top: 30%;
+              top: 25px;
+              width: 100%;
+            }
+            .container.large .user {
+              top: 100px;
             }
             .on {
               color: white;
@@ -213,6 +224,8 @@
           this.shadowRoot.append(icon, style, wrapper);
           this._wrapper = videoWrapper;
 
+          this.setNoVideo(true);
+          this.setMuted(true);
           updateWrapper(this);
         }
 
@@ -240,6 +253,11 @@
             this._videoOff.style.display = "none";
           else
             this._videoOff.style.display = "inline-block";
+          this._isVideoOn = !flag;
+        }
+
+        refreshUi() {
+          updateWrapper(this);
         }
       }
 
@@ -248,7 +266,7 @@
 
     function getRemoteVideoElByPeerId(peerId) {
       let result;
-      document.querySelectorAll("video.remoteVideo").forEach(el => {
+      document.querySelectorAll(".remoteVideo").forEach(el => {
         if (el.peerId === peerId) {
           result = el;
         }
@@ -277,11 +295,13 @@
       isAudio = !isAudio;
       this.innerText = isAudio ? "Mute" : "Unmute";
       sfu.setAudio({enabled: isAudio});
+      localVideo.setMuted(!isAudio);
     });
     videoToggle.addEventListener("click", function () {
       isVideo = !isVideo;
       this.innerText = isVideo ? "Stop video" : "Start video";
       sfu.setVideo({enabled: isVideo});
+      localVideo.setNoVideo(!isVideo);
     });
     join.addEventListener("click", function () {
       if (isJoin) {
@@ -291,6 +311,9 @@
         }
         sfu.startSession(txtRoomId.value);
         isJoin = false;
+        localVideo.setNoVideo(true);
+        localVideo.setMuted(true);
+        localVideo.srcObject = undefined;
       } else {
         sfu.endSession();
         isJoin = true;
@@ -301,32 +324,40 @@
     sfu.onEvent("end-session", function () {
       isJoin = true;
       join.innerText = "Join";
-      document.getElementById("remoteVideos").innerHTML = "";
+      removeAllChildren(document.getElementById("remoteVideos"));
+      localVideo.setNoVideo(true);
+      localVideo.setMuted(true);
+      localVideo.srcObject = undefined;
     });
-    sfu.onEvent("add-local-track", function ({stream, track}) {
-      if (track.kind === 'audio') {
-        return
+    sfu.onEvent("add-local-track", function ({stream, track, isMuted}) {
+      if (track.kind === 'video') {
+        localVideo.setNoVideo(false);
+      } else if (track.kind === 'audio') {
+        localVideo.setMuted(isMuted);
       }
       localVideo.srcObject = stream;
     });
     sfu.onEvent("peer-add", function ({peerId}) {
-
+      const el = document.createElement('user-video')
+      el.className = "remoteVideo";
+      el.peerId = peerId;
+      document.getElementById('remoteVideos').appendChild(el);
     });
-    sfu.onEvent("add-remote-track", function ({stream, track, peerId}) {
-      if (track.kind === 'video') {
-        console.log("ignoring video track")
-        return
-      }
+    sfu.onEvent("add-peer-track", function ({stream, track, peerId, isMuted}) {
       let el = getRemoteVideoElByPeerId(peerId);
-      if (!el) {
-        el = document.createElement('video')
-        el.className = "remoteVideo";
-        el.controls = false
-        el.peerId = peerId;
-        document.getElementById('remoteVideos').appendChild(el);
+      if (track.kind === 'video') {
+        el.setNoVideo(false);
+      } else if (track.kind === 'audio') {
+        el.setMuted(isMuted);
       }
       el.srcObject = stream
-      el.autoplay = true
+    });
+    sfu.onEvent("peer-muted", function ({peerId, isMuted}) {
+      let el = getRemoteVideoElByPeerId(peerId);
+      if (el) {
+        el.setMuted(isMuted);
+        el.refreshUi();
+      }
     });
     sfu.onEvent("peer-gone", function ({peerId}) {
       let el = getRemoteVideoElByPeerId(peerId);
