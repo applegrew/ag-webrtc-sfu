@@ -27,6 +27,8 @@ var (
 
 	roomCollectionsLock sync.RWMutex
 	roomCollections     map[string]*roomCollection
+	totalRooms          uint
+	totalPeers          uint
 )
 
 type roomCollection struct {
@@ -81,6 +83,8 @@ func main() {
 	// websocket handler
 	http.HandleFunc("/websocket", websocketHandler)
 
+	http.HandleFunc("/get.stats", statsHandler)
+
 	// request a keyframe every 3 seconds
 	go func() {
 		for range time.NewTicker(time.Second * 3).C {
@@ -98,6 +102,40 @@ func main() {
 
 	// start HTTP server
 	log.Fatal(http.ListenAndServe(*addr, nil))
+}
+
+func statsHandler(w http.ResponseWriter, r *http.Request) {
+	stats := struct {
+		TotalRooms uint     `json:"total-rooms"`
+		TotalPeers uint     `json:"total-peers"`
+		RoomIds    []string `json:"room-ids,omitempty"`
+	}{totalRooms, totalPeers, nil}
+
+	details, present := r.URL.Query()["details"]
+	if present && len(details) > 0 && details[0] == "true" {
+		roomCollectionsLock.Lock()
+		rooms := make([]string, 0, len(roomCollections))
+		for r := range roomCollections {
+			rooms = append(rooms, r)
+		}
+		roomCollectionsLock.Unlock()
+		stats.RoomIds = rooms
+	}
+
+	js, err := json.Marshal(stats)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Fatal(err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, err = w.Write(js)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Fatal(err)
+		return
+	}
 }
 
 // Add to list of tracks and fire renegotiation for all PeerConnections
@@ -131,11 +169,20 @@ func removeTrack(room *roomCollection, t *webrtc.TrackLocalStaticRTP) {
 
 // signalPeerConnections updates each PeerConnection so that it is getting all the expected media tracks
 func signalPeerConnections(room *roomCollection) {
+	deleteRoom := false
 	room.listLock.Lock()
 	debugLog("signalPeerConnections for room: ", room.id)
 	defer func() {
 		room.listLock.Unlock()
 		dispatchKeyFrame(room)
+		if deleteRoom {
+			roomCollectionsLock.Lock()
+			if _, present := roomCollections[room.id]; present {
+				delete(roomCollections, room.id)
+				totalRooms--
+			}
+			roomCollectionsLock.Unlock()
+		}
 	}()
 
 	attemptSync := func() (tryAgain bool) {
@@ -163,7 +210,7 @@ func signalPeerConnections(room *roomCollection) {
 				}
 			}
 
-			// Don't receive videos we are sending, make sure we don't have loopback
+			// Don't receive videos we are sending, make sure we don't have loop-back
 			for _, receiver := range room.peerConnections[i].peerConnection.GetReceivers() {
 				if receiver.Track() == nil {
 					continue
@@ -241,6 +288,11 @@ func signalPeerConnections(room *roomCollection) {
 			break
 		}
 	}
+
+	if len(room.peerConnections) == 0 {
+		// No peers in the room. Let's cleanup this room.
+		deleteRoom = true
+	}
 }
 
 // dispatchKeyFrame sends a keyframe to all PeerConnections, used everytime a new user joins the call
@@ -274,6 +326,10 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c := &threadSafeWriter{unsafeConn, sync.Mutex{}}
+
+	defer func() {
+		totalPeers--
+	}()
 
 	// When this frame returns close the Websocket
 	defer c.Close() //nolint
@@ -322,6 +378,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		roomCollections[roomId] = &roomCollection{id: roomId, peerConnections: []peerConnectionState{}, trackLocals: map[string]*localTrackData{}}
 		room, _ = roomCollections[roomId]
+		totalRooms++
 		debugLog("Added new room: ", room.id)
 	} else {
 		debugLog("Re-fetched room: ", room.id)
@@ -357,6 +414,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 	// Add our new PeerConnection to global list
 	room.listLock.Lock()
 	room.peerConnections = append(room.peerConnections, peerConnectionState{peerConnection, c, peerId})
+	totalPeers++
 	room.listLock.Unlock()
 
 	// Trickle ICE. Emit server candidate to client

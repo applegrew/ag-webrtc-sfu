@@ -2,11 +2,12 @@
 <html>
   <head>
     <meta charset="utf-8">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
     <script src="ag-webrtc-sfu.js"></script>
   </head>
   <body>
     <h3> Local Video </h3>
-    <video id="localVideo" width="160" height="120"></video> <br />
+    <user-video id="localVideo"></user-video> <br />
     <button id="audioToggle">Mute</button> | <button id="videoToggle">Stop video</button>
     <br/>
     <br/>
@@ -19,10 +20,232 @@
     <h3> Remote Video </h3>
     <div id="remoteVideos"></div> <br />
 
-
   </body>
 
   <script>
+    (function () {
+      'use strict';
+
+      function removeAllChildren(el) {
+        while (el.firstChild)
+          el.removeChild(el.firstChild);
+      }
+
+      function updateWrapper(u) {
+        const requiresVideoEl = !!u._srcObject;
+        let isVideoOn = false;
+        let isAudioOn = false;
+        if (requiresVideoEl) {
+          u._srcObject.getTracks().forEach((track) => {
+            if (track.kind === 'audio' && track.enabled && track.readyState === 'live' && !track.muted)
+              isAudioOn = true;
+            else if (track.kind === 'video' && track.enabled && track.readyState === 'live')
+              isVideoOn = true;
+            if (!track._attachedListeners)
+              track.addEventListener('ended', () => updateWrapper(u));
+            track._attachedListeners = true;
+          });
+          if (!u._srcObject._attachedListeners)
+            u._srcObject.addEventListener('removetrack', () => updateWrapper(u));
+          u._srcObject._attachedListeners = true;
+        }
+
+        u.setNoVideo(!isVideoOn);
+        u.setMuted(!isAudioOn);
+
+        if (requiresVideoEl) {
+          if (!u._videoEl) {
+            removeAllChildren(u._wrapper);
+            const el = document.createElement('video')
+            el.className = "remoteVideo";
+            el.controls = false
+            u._wrapper.appendChild(el);
+            u._videoEl = el;
+          }
+          u._videoEl.style.visibility = "visible";
+          u._videoEl.srcObject = u._srcObject;
+          u._videoEl.autoplay = true
+        } else {
+          u._videoEl = undefined;
+          removeAllChildren(u._wrapper);
+        }
+        if (!isVideoOn) {
+          if (u._videoEl)
+            u._videoEl.style.visibility = "hidden";
+          const el = document.createElement('i')
+          el.className = "fas fa-smile user";
+          u._wrapper.appendChild(el);
+        }
+      }
+
+      class UserVideo extends HTMLElement {
+        constructor() {
+          super();
+          this._videoEl = undefined;
+          this._srcObject = undefined;
+          this.attachShadow({mode: 'open'}); // sets and returns 'this.shadowRoot'
+
+          const wrapper = document.createElement('div');
+          wrapper.className = "container";
+
+          const screenOverlay = document.createElement('div');
+          screenOverlay.className = "screen_overlay";
+
+          const iconography = document.createElement('div');
+          iconography.className = "icon_panel";
+
+          const micOn = document.createElement('i');
+          micOn.className = "fas fa-microphone mic on icon";
+          micOn.style.display = 'none';
+          iconography.appendChild(micOn);
+          this._micOn = micOn;
+
+          const micOff = document.createElement('i');
+          micOff.className = "fas fa-microphone-slash mic off icon";
+          micOff.style.display = 'none';
+          iconography.appendChild(micOff);
+          this._micOff = micOff;
+
+          const videoOff = document.createElement('i');
+          videoOff.className = "fas fa-video-slash video off icon";
+          videoOff.style.display = 'none';
+          iconography.appendChild(videoOff);
+          this._videoOff = videoOff;
+
+          const expand = document.createElement('i');
+          expand.className = "fas fa-expand-alt expander";
+          screenOverlay.appendChild(expand);
+
+          let isLarge = false;
+          expand.addEventListener('click', () => {
+            isLarge = !isLarge;
+            if (isLarge) {
+              wrapper.classList.add('large');
+              expand.classList.remove('fa-expand-alt');
+              expand.classList.add('fa-compress-alt');
+            } else {
+              wrapper.classList.remove('large');
+              expand.classList.add('fa-expand-alt');
+              expand.classList.remove('fa-compress-alt');
+            }
+          });
+
+          const videoWrapper = document.createElement('div');
+          videoWrapper.className = "video_container";
+
+          wrapper.appendChild(videoWrapper);
+          wrapper.appendChild(iconography);
+          wrapper.appendChild(screenOverlay);
+
+          const icon = document.createElement('link');
+          icon.rel = 'stylesheet';
+          icon.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css';
+
+          const style = document.createElement('style');
+          style.textContent = `
+            .container {
+              transition: width 1s, height 1s;
+              position: relative;
+              height: 150px;
+              width: 150px;
+              border: 1px solid rgb(224 223 223);
+            }
+            .container.large {
+              height: 300px;
+              width: 300px;
+            }
+            .video_container, .remoteVideo {
+              position: relative;
+              height: 100%;
+              width: 100%;
+              z-index: 0;
+            }
+            .remoteVideo {
+              object-fit: cover;
+              border-radius: 6px;
+            }
+            .screen_overlay {
+              position: absolute;
+              right: 1px;
+              bottom: 1px;
+              z-index: 2;
+            }
+            .icon_panel {
+              position: absolute;
+              left: 1px;
+              bottom: 1px;
+              z-index: 1;
+              background-color: rgba(0,0,0,0.5);
+              border-radius: 3px;
+              padding-right: 5px;
+              padding-bottom: 1px;
+            }
+            .icon {
+              display: inline-block;
+              font-size: 10px;
+              margin-left: 5px;
+            }
+            .user {
+              display: block;
+              position: relative;
+              font-size: 100px;
+              text-align: center;
+              top: 30%;
+            }
+            .on {
+              color: white;
+            }
+            .off {
+              color: red;
+            }
+            .expander {
+              cursor: pointer;
+              background-color: rgba(0,0,0,0.8);
+              color: white;
+              padding: 2px;
+              border-radius: 2px;
+              font-size: 12px;
+              transform: rotateZ(90deg);
+            }
+          `;
+
+          // attach the created elements to the shadow DOM
+          this.shadowRoot.append(icon, style, wrapper);
+          this._wrapper = videoWrapper;
+
+          updateWrapper(this);
+        }
+
+        set srcObject(src) {
+          this._srcObject = src;
+          updateWrapper(this);
+        }
+
+        get srcObject() {
+          return this._srcObject;
+        }
+
+        setMuted(flag) {
+          if (!flag) {
+            this._micOn.style.display = 'inline-block';
+            this._micOff.style.display = 'none';
+          } else {
+            this._micOn.style.display = 'none';
+            this._micOff.style.display = 'inline-block';
+          }
+        }
+
+        setNoVideo(flag) {
+          if (!flag)
+            this._videoOff.style.display = "none";
+          else
+            this._videoOff.style.display = "inline-block";
+        }
+      }
+
+      customElements.define('user-video', UserVideo);
+    }());
+
     function getRemoteVideoElByPeerId(peerId) {
       let result;
       document.querySelectorAll("video.remoteVideo").forEach(el => {
@@ -85,12 +308,13 @@
         return
       }
       localVideo.srcObject = stream;
-      localVideo.autoplay = true
-      localVideo.controls = false
+    });
+    sfu.onEvent("peer-add", function ({peerId}) {
+
     });
     sfu.onEvent("add-remote-track", function ({stream, track, peerId}) {
-      if (track.kind === 'audio') {
-        console.log("ignoring audio track")
+      if (track.kind === 'video') {
+        console.log("ignoring video track")
         return
       }
       let el = getRemoteVideoElByPeerId(peerId);

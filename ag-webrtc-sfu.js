@@ -101,6 +101,7 @@
                         peer = {tracks:{}};
                     }
                     sfu._remotePeers[peer_id] = peer;
+                    fireEvent(sfu, "peer-add", {peerId: peer_id});
                 }
                 remoteTrackData = peer.tracks[id];
                 if (!remoteTrackData) {

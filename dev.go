@@ -13,16 +13,17 @@ import (
 )
 
 func setupDevMode() {
-	// Read index.html from disk into memory, serve whenever anyone requests /
-	indexHTML, err := ioutil.ReadFile("index.html")
-	if err != nil {
-		panic(err)
-	}
-	indexTemplate := &template.Template{}
-	indexTemplate = template.Must(template.New("").Parse(string(indexHTML)))
 
 	// index.html handler
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Let's fetch this everytime so that we don't have to
+		// restart this service after every change to index.html
+		indexHTML, err := ioutil.ReadFile("index.html")
+		if err != nil {
+			panic(err)
+		}
+		indexTemplate := &template.Template{}
+		indexTemplate = template.Must(template.New("").Parse(string(indexHTML)))
 		if err := indexTemplate.Execute(w, "ws://"+r.Host+"/websocket"); err != nil {
 			log.Fatal(err)
 		}
@@ -50,7 +51,12 @@ func setupDevMode() {
 			}
 
 			w.Header().Set("Content-Type", "application/json")
-			w.Write(js)
+			_, err = w.Write(js)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				log.Fatal(err)
+				return
+			}
 		}
 	})
 
