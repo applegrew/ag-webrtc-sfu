@@ -77,7 +77,7 @@
 
             case 'track-meta': {
                 console.debug("onSocketMessage, track-meta");
-                let {peer_id, id} = JSON.parse(msg.data);
+                let {peer_id, id, peer_name} = JSON.parse(msg.data);
                 if (!peer_id || !id) {
                     return console.warn('Failed to parse track-meta');
                 }
@@ -87,6 +87,7 @@
                     remoteTrackData = sfu._remotePeers[PARKING][id];
                     if (remoteTrackData) {
                         peer = {
+                            peerName: peer_name,
                             tracks: {
                                 [id]: remoteTrackData
                             }
@@ -107,10 +108,15 @@
                                 }
                             }
                         });
-                        peer = {tracks: {}};
+                        peer = {
+                            peerName: peer_name,
+                            tracks: {}
+                        };
                     }
                     sfu._remotePeers[peer_id] = peer;
-                    fireEvent(sfu, "peer-add", {peerId: peer_id});
+                    fireEvent(sfu, "peer-add", {peerId: peer_id, peerName: peer_name});
+                } else {
+                    peer.peerName = peer_name;
                 }
                 remoteTrackData = peer.tracks[id];
                 if (!remoteTrackData) {

@@ -7,7 +7,7 @@
   </head>
   <body>
     <h3> Local Video </h3>
-    <user-video id="localVideo"></user-video> <br />
+    <user-video id="localVideo" label="Self"></user-video> <br />
     <button id="audioToggle">Mute</button> | <button id="videoToggle">Stop video</button>
     <br/>
     <br/>
@@ -93,8 +93,11 @@
             const wrapper = document.createElement('div');
             wrapper.className = "container";
 
-            const screenOverlay = document.createElement('div');
-            screenOverlay.className = "screen_overlay";
+            const labelOverlay = document.createElement('div');
+            labelOverlay.className = "label_overlay";
+
+            const expanderOverlay = document.createElement('div');
+            expanderOverlay.className = "screen_overlay";
 
             const iconography = document.createElement('div');
             iconography.className = "icon_panel";
@@ -119,7 +122,7 @@
 
             const expand = document.createElement('i');
             expand.className = "fas fa-expand-alt expander";
-            screenOverlay.appendChild(expand);
+            expanderOverlay.appendChild(expand);
 
             let isLarge = false;
             expand.addEventListener('click', () => {
@@ -135,12 +138,19 @@
               }
             });
 
+            const label = document.createElement('span');
+            label.className = 'label';
+            labelOverlay.appendChild(label);
+            this._labelEl = label;
+            this.label = this.getAttribute("label");
+
             const videoWrapper = document.createElement('div');
             videoWrapper.className = "video_container";
 
             wrapper.appendChild(videoWrapper);
+            wrapper.appendChild(labelOverlay);
             wrapper.appendChild(iconography);
-            wrapper.appendChild(screenOverlay);
+            wrapper.appendChild(expanderOverlay);
 
             const icon = document.createElement('link');
             icon.rel = 'stylesheet';
@@ -175,6 +185,28 @@
                 right: 1px;
                 bottom: 1px;
                 z-index: 2;
+              }
+              .label_overlay {
+                position: absolute;
+                left: 0;
+                top: 0;
+                z-index: 1;
+                background-color: rgba(0,0,0,0.5);
+                border-top-left-radius: 3px;
+                border-bottom-right-radius: 3px;
+                padding: 2px;
+                opacity: 0;
+                transition: opacity 1s;
+              }
+              .container:hover .label_overlay {
+                opacity: 1;
+              }
+              .container:hover .label_overlay .label {
+                opacity: 1;
+              }
+              .label_overlay .label {
+                color: white;
+                opacity: 0;
               }
               .icon_panel {
                 position: absolute;
@@ -258,6 +290,12 @@
           refreshUi() {
             updateWrapper(this);
           }
+
+          set label(l) {
+            removeAllChildren(this._labelEl);
+            const t = document.createTextNode(l);
+            this._labelEl.appendChild(t);
+          }
         }
 
         customElements.define('user-video', UserVideo);
@@ -336,10 +374,11 @@
         }
         localVideo.srcObject = stream;
       });
-      sfu.onEvent("peer-add", function ({peerId}) {
+      sfu.onEvent("peer-add", function ({peerId, peerName}) {
         const el = document.createElement('user-video')
         el.className = "remoteVideo";
         el.peerId = peerId;
+        el.label = peerName;
         document.getElementById('remoteVideos').appendChild(el);
       });
       sfu.onEvent("add-peer-track", function ({stream, track, peerId, isMuted}) {
