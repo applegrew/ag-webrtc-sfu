@@ -40,7 +40,13 @@
                     return
                 }
                 sfu._peerId = msg.data;
-                ws.send(JSON.stringify({event: "login-reply", data: JSON.stringify({token: sfu._token, token_hint: sfu._tokenHint})}));
+                ws.send(JSON.stringify({
+                    event: "login-reply",
+                    data: JSON.stringify({
+                        token: sfu._token,
+                        peer_name: sfu._peerName,
+                        token_hint: sfu._tokenHint})
+                }));
                 sfu._token = undefined; // Tokens are valid for limited time. So no use storing them once used.
                 return
 
@@ -164,7 +170,8 @@
     }
 
     // ---- Sfu definition -----
-    function Sfu(connectionStringResolver) {
+    function Sfu(peerName, connectionStringResolver) {
+        this._peerName = peerName;
         this._videoEnabled = true;
         this._audioEnabled = true;
         this._peerId = undefined;
@@ -204,8 +211,9 @@
             let disableAudio = false;
             if (!this._audioEnabled)
                 disableAudio = true;
-            mediaDevices.getUserMedia({ video: this._videoEnabled, audio: true }).then(stream => {
+            mediaDevices.getUserMedia({ video: this._videoEnabled, audio: true }).then((stream) => {
                 this._localStream = stream;
+                let isDone = false;
                 stream.getTracks().forEach(track => {
                     this._pc.addTrack(track, stream);
                     if (track.kind === 'audio') {
@@ -213,6 +221,8 @@
                             track.enabled = false;
                     }
                     track.onended = () => {
+                        if (track.kind === 'video')
+                            isDone = true;
                         fireEvent(this, "remove-local-track", {stream, track});
                     };
                     fireEvent(this, "add-local-track", {stream, track, isMuted: track.kind === 'audio'? !track.enabled : undefined});

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/golang-jwt/jwt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -18,10 +19,11 @@ import (
 )
 
 var (
-	addr      = flag.String("addr", ":9000", "http service address")
-	isDevMode = flag.Bool("dev", false, "is dev mode enabled")
-	isVerbose = flag.Bool("verbose", false, "is verbose logging enabled")
-	upgrader  = websocket.Upgrader{
+	addr             = flag.String("addr", ":9000", "http service address")
+	isDevMode        = flag.Bool("dev", false, "is dev mode enabled")
+	isVerbose        = flag.Bool("verbose", false, "is verbose logging enabled")
+	tokenKeyProvider = flag.String("provider", "env", "token key provider")
+	upgrader         = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return true },
 	}
 
@@ -29,6 +31,10 @@ var (
 	roomCollections     map[string]*roomCollection
 	totalRooms          uint
 	totalPeers          uint
+
+	tokenKeyProviderUrl         string
+	tokenKeyProviderUrlUser     string
+	tokenKeyProviderUrlPassword string
 )
 
 type roomCollection struct {
@@ -40,8 +46,9 @@ type roomCollection struct {
 }
 
 type localTrackData struct {
-	track        *webrtc.TrackLocalStaticRTP
-	remotePeerId string
+	track          *webrtc.TrackLocalStaticRTP
+	remotePeerId   string
+	remotePeerName string
 }
 
 type websocketMessage struct {
@@ -78,6 +85,17 @@ func main() {
 
 	if *isDevMode {
 		setupDevMode()
+	}
+
+	if *tokenKeyProvider == "url" {
+		url := os.Getenv("AG_WEBRTC_SFU_URL")
+		if url == "" {
+			log.Fatal("AG_WEBRTC_SFU_URL does not contain a value")
+			return
+		}
+		tokenKeyProviderUrl = url
+		tokenKeyProviderUrlUser = os.Getenv("AG_WEBRTC_SFU_URL_USER")
+		tokenKeyProviderUrlPassword = os.Getenv("AG_WEBRTC_SFU_URL_PASSWORD")
 	}
 
 	// websocket handler
@@ -139,7 +157,7 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // Add to list of tracks and fire renegotiation for all PeerConnections
-func addTrack(room *roomCollection, t *webrtc.TrackRemote, peerId string) *webrtc.TrackLocalStaticRTP {
+func addTrack(room *roomCollection, t *webrtc.TrackRemote, peerId string, peerName string) *webrtc.TrackLocalStaticRTP {
 	room.listLock.Lock()
 	defer func() {
 		room.listLock.Unlock()
@@ -152,7 +170,7 @@ func addTrack(room *roomCollection, t *webrtc.TrackRemote, peerId string) *webrt
 		panic(err)
 	}
 
-	room.trackLocals[t.ID()] = &localTrackData{trackLocal, peerId}
+	room.trackLocals[t.ID()] = &localTrackData{trackLocal, peerId, peerName}
 	return trackLocal
 }
 
@@ -202,7 +220,7 @@ func signalPeerConnections(room *roomCollection) {
 
 				existingSenders[sender.Track().ID()] = true
 
-				// If we have a RTPSender that doesn't map to a existing track remove and signal
+				// If we have a RTPSender that doesn't map to an existing track remove and signal
 				if _, ok := room.trackLocals[sender.Track().ID()]; !ok {
 					if err := room.peerConnections[i].peerConnection.RemoveTrack(sender); err != nil {
 						return true
@@ -230,9 +248,10 @@ func signalPeerConnections(room *roomCollection) {
 						" for remote peer: ", room.trackLocals[trackID].remotePeerId)
 
 					trackMeta, err := json.Marshal(struct {
-						Id     string `json:"id"`
-						PeerId string `json:"peer_id"`
-					}{room.trackLocals[trackID].track.StreamID(), room.trackLocals[trackID].remotePeerId})
+						Id       string `json:"id"`
+						PeerId   string `json:"peer_id"`
+						PeerName string `json:"peer_name"`
+					}{room.trackLocals[trackID].track.StreamID(), room.trackLocals[trackID].remotePeerId, room.trackLocals[trackID].remotePeerName})
 					if err != nil {
 						log.Println(err)
 						return
@@ -290,7 +309,7 @@ func signalPeerConnections(room *roomCollection) {
 	}
 
 	if len(room.peerConnections) == 0 {
-		// No peers in the room. Let's cleanup this room.
+		// No peers in the room. Let us cleanup this room.
 		deleteRoom = true
 	}
 }
@@ -318,7 +337,7 @@ func dispatchKeyFrame(room *roomCollection) {
 
 // Handle incoming websockets
 func websocketHandler(w http.ResponseWriter, r *http.Request) {
-	// Upgrade HTTP request to Websocket
+	// Upgrade HTTP Request to Websocket
 	unsafeConn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Print("upgrade:", err)
@@ -361,18 +380,25 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 
 	loginData := struct {
 		Token     string `json:"token"`
+		PeerName  string `json:"peer_name"`
 		TokenHint string `json:"token_hint"`
 	}{}
 	if err := json.Unmarshal([]byte(message.Data), &loginData); err != nil {
 		log.Println(err)
 		return
 	}
-	roomId, err := validateTokenAndGetRoomId(loginData.Token, loginData.TokenHint, getTokenKey)
+	provider := getTokenKeyFromEnv
+	if *tokenKeyProvider == "url" {
+		provider = getTokenKeyFromUrl
+	}
+	roomId, err := validateTokenAndGetRoomId(loginData.Token, loginData.TokenHint, provider)
 	if err != nil {
 		log.Println("Provided token: " + loginData.Token)
 		log.Println(err)
 		return
 	}
+	peerName := loginData.PeerName
+
 	roomCollectionsLock.Lock()
 	room, ok := roomCollections[roomId]
 	if !ok {
@@ -454,7 +480,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 	peerConnection.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		debugLog("peerConnection.OnTrack for peer: ", peerId, " of room: ", room.id, " with track id: ", t.ID())
 		// Create a track to fan out our incoming video to all peers
-		trackLocal := addTrack(room, t, peerId)
+		trackLocal := addTrack(room, t, peerId, peerName)
 		defer removeTrack(room, trackLocal)
 
 		buf := make([]byte, 1500)
@@ -553,10 +579,6 @@ func validateTokenAndGetRoomId(tokenString string, tokenHint string, tokenKeyFet
 	}
 }
 
-func getTokenKey(tokenHint string) (string, error) {
-	return os.Getenv("AG_WEBRTC_SFU_KEY"), nil
-}
-
 // Helper to make Gorilla Websockets thread-safe
 type threadSafeWriter struct {
 	*websocket.Conn
@@ -581,4 +603,33 @@ func broadcastToOtherPeersInRoom(room *roomCollection, fromPeerId string, messag
 		}
 	}
 	room.listLock.Unlock()
+}
+
+func getTokenKeyFromEnv(_ string) (string, error) {
+	return os.Getenv("AG_WEBRTC_SFU_KEY"), nil
+}
+
+func getTokenKeyFromUrl(tokenHint string) (string, error) {
+	req, err := http.NewRequest("GET", tokenKeyProviderUrl, nil)
+	if err != nil {
+		return "", err
+	}
+	req.URL.Query().Set("tokenHint", tokenHint)
+	req.SetBasicAuth(tokenKeyProviderUrlUser, tokenKeyProviderUrlPassword)
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	bodyText, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	tokenResponse := struct {
+		Token string `json:"token"`
+	}{}
+	if err := json.Unmarshal(bodyText, &tokenResponse); err != nil {
+		return "", err
+	}
+	return tokenResponse.Token, nil
 }
