@@ -1,0 +1,22 @@
+{
+  "name": "ag-webrtc-sfu",
+  "version": "1.0.0",
+  "description": "This is a many-to-many websocket based SFU. This has the following features.",
+  "main": "ag-webrtc-sfu.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/applegrew/ag-webrtc-sfu.git"
+  },
+  "keywords": [
+    "webrtc"
+  ],
+  "author": "Nirupam Biswas",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/applegrew/ag-webrtc-sfu/issues"
+  },
+  "homepage": "https://github.com/applegrew/ag-webrtc-sfu#readme"
+}

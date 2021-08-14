@@ -2,6 +2,7 @@
 
 (function (g, console, mediaDevices) {
     const PARKING = 'PARKING';
+    const VERSION = '1.0';
 
     function fireEvent(sfu, eventName, payload) {
         console.debug("fireEvent, eventName: ", eventName);
@@ -190,7 +191,8 @@
         this._remotePeersStateCahce = {};
     }
     Sfu.prototype = {
-        MAX_RETRY_COUNT: 5
+        MAX_RETRY_COUNT: 5,
+        VERSION
     };
     Sfu.prototype.isInSession = function () {
         return !!this._pc;
