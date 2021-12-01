@@ -10,6 +10,8 @@ This is a many-to-many websocket based SFU. This has the following features.
 * Concept of rooms. The conference tracks are forwarded within a given room.
 * Supports JWT based authentication to connect to websocket to initiate Webrtc peer connection.
 
+It has a npm module to easily get the `ag-webrtc-sfu.js` file from here for use on client-sides.
+
 
 ## Instructions
 ### Download
